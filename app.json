@@ -77,6 +77,9 @@
               "arm64-v8a"
             ],
             "usesCleartextTraffic": true
+          },
+          "ios": {
+            "deploymentTarget": "15.1"
           }
         }
       ],

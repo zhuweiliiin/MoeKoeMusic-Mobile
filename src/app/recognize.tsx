@@ -3,8 +3,10 @@ import {
   getRecordingPermissionsAsync,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
-  useAudioStream,
+  useAudioRecorder,
+  RecordingPresets,
 } from 'expo-audio';
+import { File as ExpoFile } from 'expo-file-system';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -27,11 +29,9 @@ import { MaxContentWidth } from '@/constants/theme';
 import { playerActions, useHasTrack } from '@/features/player/store';
 import type { PlayerTrack } from '@/features/player/types';
 import {
-  buildRecognizePcm,
   recognizeAudio,
   RECOGNIZE_MAX_SECONDS,
   RECOGNIZE_SAMPLE_RATE,
-  type PcmChunk,
   type RecognizeMatch,
 } from '@/features/recognize/recognize-api';
 import { usePalette } from '@/hooks/use-palette';
@@ -67,29 +67,39 @@ export default function RecognizeScreen() {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
 
-  const chunksRef = useRef<PcmChunk[]>([]);
+  const recordingFileUriRef = useRef<string | null>(null);
   const capturingRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const secondsRef = useRef(0);
   // 每次开始识别自增；reset 也自增使晚到的旧结果失效
   const recognizeSeqRef = useRef(0);
 
-  const { stream } = useAudioStream({
+  const recorder = useAudioRecorder({
+    ...RecordingPresets.HIGH_QUALITY,
     sampleRate: RECOGNIZE_SAMPLE_RATE,
-    channels: 1,
-    encoding: 'int16',
-    onBuffer: (buffer) => {
-      if (capturingRef.current) {
-        chunksRef.current.push({
-          data: buffer.data,
-          sampleRate: buffer.sampleRate,
-          channels: buffer.channels,
-        });
-      }
+    numberOfChannels: 1,
+    bitRate: RECOGNIZE_SAMPLE_RATE * 16,
+    extension: '.caf',
+    ios: {
+      ...RecordingPresets.HIGH_QUALITY.ios,
+      sampleRate: RECOGNIZE_SAMPLE_RATE,
+      outputFormat: 'lpcm' as any,
+      audioQuality: 0x7F as any,
+      linearPCMBitDepth: 16,
+      linearPCMIsBigEndian: false,
+      linearPCMIsFloat: false,
     },
+    android: {
+      ...RecordingPresets.HIGH_QUALITY.android,
+      sampleRate: RECOGNIZE_SAMPLE_RATE,
+    },
+  }, (status) => {
+    if (status.isFinished && recordingFileUriRef.current) {
+      // 录音完成，文件已写入
+    }
   });
-  const streamRef = useRef(stream);
-  streamRef.current = stream;
+  const recorderRef = useRef(recorder);
+  recorderRef.current = recorder;
 
   const pulse = useRef(new Animated.Value(0)).current;
   const ripple = useRef(new Animated.Value(0)).current;
@@ -143,7 +153,7 @@ export default function RecognizeScreen() {
       }
       capturingRef.current = false;
       try {
-        streamRef.current.stop();
+        recorderRef.current.stop();
       } catch {
         // 未开始录音时 stop 可能抛错，忽略
       }
@@ -182,7 +192,7 @@ export default function RecognizeScreen() {
     // 录音时暂停自家播放，避免识别到正在播的歌
     playerActions.pause();
 
-    chunksRef.current = [];
+    recordingFileUriRef.current = null;
     setMatches([]);
     setSelectedIndex(0);
     setErrorMsg('');
@@ -190,7 +200,8 @@ export default function RecognizeScreen() {
 
     try {
       await setAudioModeAsync(RECORDING_AUDIO_MODE);
-      await stream.start();
+      await recorder.prepareToRecordAsync();
+      recorder.record();
     } catch (error) {
       void setAudioModeAsync(PLAYBACK_AUDIO_MODE).catch(() => undefined);
       setStatus('failed');
@@ -211,7 +222,7 @@ export default function RecognizeScreen() {
     }, 1000);
   }
 
-  function stopRecording() {
+  async function stopRecording() {
     if (!capturingRef.current) {
       return;
     }
@@ -219,7 +230,8 @@ export default function RecognizeScreen() {
     clearTimer();
     capturingRef.current = false;
     try {
-      stream.stop();
+      await recorder.stop();
+      recordingFileUriRef.current = recorder.uri;
     } catch {
       // 忽略重复 stop
     }
@@ -228,8 +240,23 @@ export default function RecognizeScreen() {
   }
 
   async function runRecognize() {
-    const pcm = buildRecognizePcm(chunksRef.current);
     const seq = ++recognizeSeqRef.current;
+    const fileUri = recordingFileUriRef.current;
+
+    if (!fileUri) {
+      setStatus('failed');
+      setErrorMsg('没有录到声音，请靠近音源重试');
+      return;
+    }
+
+    let pcm: ArrayBuffer;
+    try {
+      pcm = await readPcmFromCaf(fileUri);
+    } catch {
+      setStatus('failed');
+      setErrorMsg('无法读取录音文件');
+      return;
+    }
 
     // 少于 1 秒的样本基本识别不出来
     if (pcm.byteLength < RECOGNIZE_SAMPLE_RATE * 2) {
@@ -240,7 +267,7 @@ export default function RecognizeScreen() {
 
     setStatus('recognizing');
     try {
-      const result = await recognizeAudio(pcm);
+      const result = await recognizeAudio(new Uint8Array(pcm));
       if (seq !== recognizeSeqRef.current) {
         return;
       }
@@ -273,6 +300,7 @@ export default function RecognizeScreen() {
   function reset() {
     clearTimer();
     capturingRef.current = false;
+    recordingFileUriRef.current = null;
     secondsRef.current = 0;
     recognizeSeqRef.current += 1;
     setStatus('idle');
@@ -626,3 +654,50 @@ const styles = StyleSheet.create({
     maxWidth: 680,
   },
 });
+
+/**
+ * 从 CAF (Core Audio Format) 文件中提取 PCM 数据。
+ * CAF 结构：8 字节头部 + 若干 chunk（每个 chunk = 4 字节类型 + 8 字节大小 + 数据）。
+ * 我们只需要找到 "data" chunk 并返回其内容。
+ */
+async function readPcmFromCaf(fileUri: string): Promise<ArrayBuffer> {
+  const file = new ExpoFile(fileUri);
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+
+  // 验证 CAF magic: "caff"
+  const magic = String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]);
+  if (magic !== 'caff') {
+    // 不是 CAF 格式，尝试当作 WAV 文件处理
+    if (String.fromCharCode(bytes[0], bytes[1], bytes[2], bytes[3]) === 'RIFF') {
+      // WAV 文件：数据从第 44 字节开始（标准 WAV 头部）
+      return buffer.slice(44);
+    }
+    throw new Error(`Unsupported audio format: ${magic}`);
+  }
+
+  const view = new DataView(buffer);
+
+  // 遍历 chunks 找到 "data"
+  let offset = 8; // 跳过 CAF header
+  while (offset + 12 <= bytes.byteLength) {
+    const chunkType = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
+    // chunk size 是 8 字节 uint64 LE，但通常小于 2^32
+    const chunkSizeLow = view.getUint32(offset + 4, true);
+    const chunkSizeHigh = view.getUint32(offset + 8, true);
+    const chunkSize = chunkSizeHigh * 0x100000000 + chunkSizeLow;
+
+    offset += 12; // 跳过 chunk header
+
+    if (chunkType === 'data') {
+      // "data" chunk 的前 4 字节是 edit count，之后是 PCM 数据
+      const dataOffset = offset + 4;
+      const dataLength = chunkSize - 4;
+      return buffer.slice(dataOffset, dataOffset + dataLength);
+    }
+
+    offset += chunkSize;
+  }
+
+  throw new Error('No data chunk found in CAF file');
+}

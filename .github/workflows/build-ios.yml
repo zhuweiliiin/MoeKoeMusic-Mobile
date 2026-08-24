@@ -1,0 +1,70 @@
+name: Build iOS IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      ios_deployment_target:
+        description: 'iOS Deployment Target'
+        required: false
+        default: '15.1'
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v2
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Prebuild iOS
+        run: npx expo prebuild --platform ios --no-install
+
+      - name: Install CocoaPods
+        run: |
+          cd ios
+          pod install --repo-update
+
+      - name: Build iOS (unsigned)
+        run: |
+          cd ios
+          xcodebuild \
+            -workspace MoeKoe.xcworkspace \
+            -scheme MoeKoe \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            IPHONEOS_DEPLOYMENT_TARGET=${{ github.event.inputs.ios_deployment_target || '15.1' }}
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          APP_PATH=$(find ios/build/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
+          cp -R "$APP_PATH" Payload/
+          zip -r MoeKoe-iOS15-unsigned.ipa Payload/
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: MoeKoe-iOS15-unsigned-ipa
+          path: MoeKoe-iOS15-unsigned.ipa
+          retention-days: 14
