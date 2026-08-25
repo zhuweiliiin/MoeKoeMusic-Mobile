@@ -96,10 +96,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Xcode 16.4
+      - name: Select Xcode 26
         run: |
-          # SDK 55 官方支持 Xcode 16.1+，使用 macos-15 自带的 Xcode 16.4
-          sudo xcode-select -s /Applications/Xcode_16.4.app
+          # expo-modules-core 55 使用 @MainActor 继承列表语法，需要 Xcode 26 (Swift 6.2)
+          XCODE26=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$XCODE26" ]; then
+            echo "Using $XCODE26"
+            sudo xcode-select -s "$XCODE26"
+          else
+            echo "Xcode 26 not found, available Xcode versions:"
+            ls -d /Applications/Xcode*.app 2>/dev/null
+          fi
           xcodebuild -version
 
       - name: Setup Node.js
