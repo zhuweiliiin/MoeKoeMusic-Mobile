@@ -53,6 +53,21 @@ jobs:
           cd ios
           pod install --repo-update
 
+      - name: Force Swift 5.0 for all Pod targets
+        working-directory: ios
+        run: |
+          # expo-modules-core and other SDK 55 native modules can fail under
+          # Swift 6 strict-concurrency diagnostics on newer Xcode toolchains.
+          PODS_PROJ="Pods/Pods.xcodeproj/project.pbxproj"
+          if [ ! -f "$PODS_PROJ" ]; then
+            echo "ERROR: Pods project not found: $PODS_PROJ"
+            exit 1
+          fi
+
+          sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.0;/g' "$PODS_PROJ"
+          echo "=== Swift versions in Pods project ==="
+          grep "SWIFT_VERSION" "$PODS_PROJ" | sort -u || true
+
       - name: Build iOS (unsigned)
         id: xcodebuild
         continue-on-error: true
@@ -71,6 +86,8 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             COMPILER_INDEX_STORE_ENABLE=NO \
             IPHONEOS_DEPLOYMENT_TARGET=${{ github.event.inputs.ios_deployment_target || '15.1' }} \
+            SWIFT_VERSION=5.0 \
+            OTHER_SWIFT_FLAGS="-swift-version 5" \
             2>&1 | tee ../build-logs/xcodebuild.log
 
       - name: Show deployment targets and toolchain
