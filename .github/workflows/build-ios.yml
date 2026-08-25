@@ -14,29 +14,33 @@ on:
 jobs:
   build-ios:
     name: Build iOS IPA
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 60
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select Xcode 26.2
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.2.app
+          xcodebuild -version
+          xcodebuild -showsdks | grep -E 'iphoneos|iphonesimulator'
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '20.19.4'
           cache: 'npm'
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v2
-        with:
-          version: 9
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
 
+      - name: Expo Doctor
+        run: npx expo-doctor@latest
+
       - name: Prebuild iOS
-        run: npx expo prebuild --platform ios --no-install
+        run: npx expo prebuild --platform ios --no-install --clean
 
       - name: Install CocoaPods
         run: |
@@ -63,13 +67,21 @@ jobs:
             IPHONEOS_DEPLOYMENT_TARGET=${{ github.event.inputs.ios_deployment_target || '15.1' }} \
             2>&1 | tee ../build-logs/xcodebuild.log
 
-      - name: Show deployment targets
+      - name: Show deployment targets and toolchain
         if: always()
         run: |
           mkdir -p build-logs
-          cd ios
-          xcodebuild -workspace MoeKoe.xcworkspace -scheme MoeKoe -showBuildSettings 2>&1 | grep -E 'IPHONEOS_DEPLOYMENT_TARGET|PRODUCT_BUNDLE_IDENTIFIER|SWIFT_VERSION|CLANG_CXX_LANGUAGE_STANDARD' > ../build-logs/build-settings.txt || true
-          find . -name '*.xcconfig' -o -name 'Podfile.lock' | sort > ../build-logs/native-files.txt
+          {
+            echo '=== Xcode ==='
+            xcodebuild -version
+            echo '=== SDKs ==='
+            xcodebuild -showsdks
+            echo '=== Build settings ==='
+            cd ios
+            xcodebuild -workspace MoeKoe.xcworkspace -scheme MoeKoe -showBuildSettings 2>&1 | grep -E 'IPHONEOS_DEPLOYMENT_TARGET|PRODUCT_BUNDLE_IDENTIFIER|SWIFT_VERSION|SWIFT_STRICT_CONCURRENCY|CLANG_CXX_LANGUAGE_STANDARD' || true
+            echo '=== Native files ==='
+            find . -name '*.xcconfig' -o -name 'Podfile.lock' | sort
+          } > build-logs/build-settings.txt 2>&1 || true
 
       - name: Upload build logs
         if: always()
@@ -83,13 +95,22 @@ jobs:
         if: steps.xcodebuild.outcome == 'failure'
         run: exit 1
 
+      - name: Verify built app
+        run: |
+          APP_PATH=$(find ios/build/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
+          test -n "$APP_PATH"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist" || true
+          file "$APP_PATH/MoeKoe"
+
       - name: Package IPA
         run: |
+          rm -rf Payload MoeKoe-iOS15-unsigned.ipa
           mkdir -p Payload
           APP_PATH=$(find ios/build/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
           test -n "$APP_PATH"
           cp -R "$APP_PATH" Payload/
-          zip -r MoeKoe-iOS15-unsigned.ipa Payload/
+          zip -qry MoeKoe-iOS15-unsigned.ipa Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
