@@ -53,20 +53,45 @@ jobs:
           cd ios
           pod install --repo-update
 
-      - name: Force Swift 5.0 for all Pod targets
+      - name: Force Swift 5.0 and disable unused RNScreens gamma sources
         working-directory: ios
         run: |
-          # expo-modules-core and other SDK 55 native modules can fail under
-          # Swift 6 strict-concurrency diagnostics on newer Xcode toolchains.
-          PODS_PROJ="Pods/Pods.xcodeproj/project.pbxproj"
-          if [ ! -f "$PODS_PROJ" ]; then
-            echo "ERROR: Pods project not found: $PODS_PROJ"
-            exit 1
-          fi
+          # SDK 55 officially uses react-native-screens ~4.23.0, so keep the
+          # supported version but exclude its experimental gamma sources.
+          # The app does not use unstable SplitView/gamma APIs, and these files
+          # currently fail to compile against the generated RN 0.83 Fabric spec.
+          ruby <<'RUBY'
+          require 'xcodeproj'
 
-          sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.0;/g' "$PODS_PROJ"
-          echo "=== Swift versions in Pods project ==="
-          grep "SWIFT_VERSION" "$PODS_PROJ" | sort -u || true
+          project_path = 'Pods/Pods.xcodeproj'
+          project = Xcodeproj::Project.open(project_path)
+
+          target = project.targets.find { |t| t.name == 'RNScreens' }
+          abort 'ERROR: RNScreens target not found' unless target
+
+          target.build_configurations.each do |config|
+            settings = config.build_settings
+            settings['SWIFT_VERSION'] = '5.0'
+            excluded = settings['EXCLUDED_SOURCE_FILE_NAMES'].to_s
+            patterns = [
+              'gamma/*.swift',
+              'gamma/*/*.swift',
+              'gamma/*/*/*.swift'
+            ]
+            merged = ([excluded] + patterns).reject(&:empty?).join(' ')
+            settings['EXCLUDED_SOURCE_FILE_NAMES'] = merged
+          end
+
+          project.save
+          puts '=== RNScreens compatibility settings ==='
+          target.build_configurations.each do |config|
+            puts "#{config.name}: SWIFT_VERSION=#{config.build_settings['SWIFT_VERSION']}"
+            puts "#{config.name}: EXCLUDED_SOURCE_FILE_NAMES=#{config.build_settings['EXCLUDED_SOURCE_FILE_NAMES']}"
+          end
+          RUBY
+
+          echo "=== Remaining Swift versions in Pods project ==="
+          grep "SWIFT_VERSION" Pods/Pods.xcodeproj/project.pbxproj | sort -u || true
 
       - name: Build iOS (unsigned)
         id: xcodebuild
@@ -101,7 +126,7 @@ jobs:
             xcodebuild -showsdks
             echo '=== Build settings ==='
             cd ios
-            xcodebuild -workspace MoeKoe.xcworkspace -scheme MoeKoe -showBuildSettings 2>&1 | grep -E 'IPHONEOS_DEPLOYMENT_TARGET|PRODUCT_BUNDLE_IDENTIFIER|SWIFT_VERSION|SWIFT_STRICT_CONCURRENCY|CLANG_CXX_LANGUAGE_STANDARD' || true
+            xcodebuild -workspace MoeKoe.xcworkspace -scheme MoeKoe -showBuildSettings 2>&1 | grep -E 'IPHONEOS_DEPLOYMENT_TARGET|PRODUCT_BUNDLE_IDENTIFIER|SWIFT_VERSION|SWIFT_STRICT_CONCURRENCY|EXCLUDED_SOURCE_FILE_NAMES|CLANG_CXX_LANGUAGE_STANDARD' || true
             echo '=== Native files ==='
             find . \( -name '*.xcconfig' -o -name 'Podfile.lock' \) -print | sort
           } > build-logs/build-settings.txt 2>&1 || true
