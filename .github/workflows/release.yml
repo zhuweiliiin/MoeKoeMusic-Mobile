@@ -122,11 +122,11 @@ jobs:
           npm run generate:mobile-api
 
       - name: Prebuild iOS project
-        run: EXPO_USE_PRECOMPILED_MODULES=1 npx expo prebuild --platform ios --no-install
+        run: npx expo prebuild --platform ios --no-install
 
       - name: Install CocoaPods dependencies
         working-directory: ios
-        run: EXPO_USE_PRECOMPILED_MODULES=1 pod install
+        run: pod install
 
       # 关闭代码签名构建 archive，产出未签名 IPA，供用户自行签名安装
       - name: Build unsigned archive
