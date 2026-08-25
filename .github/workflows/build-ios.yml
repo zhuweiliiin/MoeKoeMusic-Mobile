@@ -1,6 +1,9 @@
 name: Build iOS IPA
 
 on:
+  push:
+    branches:
+      - ios15-debug
   workflow_dispatch:
     inputs:
       ios_deployment_target:
@@ -59,6 +62,7 @@ jobs:
         run: |
           mkdir -p Payload
           APP_PATH=$(find ios/build/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
+          test -n "$APP_PATH"
           cp -R "$APP_PATH" Payload/
           zip -r MoeKoe-iOS15-unsigned.ipa Payload/
 
