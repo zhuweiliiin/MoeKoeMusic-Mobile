@@ -21,9 +21,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 26.2
+      - name: Select Xcode 26.6
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.2.app
+          sudo xcode-select -s /Applications/Xcode_26.6.app
           xcodebuild -version
           xcodebuild -showsdks | grep -E 'iphoneos|iphonesimulator'
 
@@ -38,6 +38,9 @@ jobs:
 
       - name: Expo Doctor
         run: npx expo-doctor@latest
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
 
       - name: Prebuild iOS
         run: npx expo prebuild --platform ios --no-install --clean
@@ -80,7 +83,7 @@ jobs:
             cd ios
             xcodebuild -workspace MoeKoe.xcworkspace -scheme MoeKoe -showBuildSettings 2>&1 | grep -E 'IPHONEOS_DEPLOYMENT_TARGET|PRODUCT_BUNDLE_IDENTIFIER|SWIFT_VERSION|SWIFT_STRICT_CONCURRENCY|CLANG_CXX_LANGUAGE_STANDARD' || true
             echo '=== Native files ==='
-            find . -name '*.xcconfig' -o -name 'Podfile.lock' | sort
+            find . \( -name '*.xcconfig' -o -name 'Podfile.lock' \) -print | sort
           } > build-logs/build-settings.txt 2>&1 || true
 
       - name: Upload build logs
@@ -100,8 +103,9 @@ jobs:
           APP_PATH=$(find ios/build/Build/Products/Release-iphoneos -name "*.app" -type d | head -1)
           test -n "$APP_PATH"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist"
-          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist" || true
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' "$APP_PATH/Info.plist"
           file "$APP_PATH/MoeKoe"
+          lipo -info "$APP_PATH/MoeKoe"
 
       - name: Package IPA
         run: |
