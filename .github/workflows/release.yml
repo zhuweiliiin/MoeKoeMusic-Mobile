@@ -116,6 +116,21 @@ jobs:
       - name: Prebuild iOS project
         run: npx expo prebuild --platform ios --no-install
 
+      - name: Fix Swift 6 concurrency issues
+        run: |
+          # Add post_install hook to Podfile to use Swift 5 mode
+          cat >> ios/Podfile << 'PODFILE_EOF'
+
+          post_install do |installer|
+            installer.pods_project.targets.each do |target|
+              target.build_configurations.each do |config|
+                config.build_settings['SWIFT_VERSION'] = '5.0'
+              end
+            end
+          end
+          PODFILE_EOF
+          echo "Podfile updated with Swift 5.0 post_install hook"
+
       - name: Install CocoaPods dependencies
         working-directory: ios
         run: pod install
