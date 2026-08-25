@@ -41,3 +41,6 @@ example
 # generated native folders
 /ios
 /android
+
+# 平台对账配置，不进仓库
+.coze
