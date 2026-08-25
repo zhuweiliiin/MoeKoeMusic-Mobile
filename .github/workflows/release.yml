@@ -96,17 +96,10 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Xcode 26
+      - name: Select Xcode 16.4
         run: |
-          # SDK 55 采用 Swift 6 语言模式，需要 Xcode 26
-          XCODE26=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
-          if [ -n "$XCODE26" ]; then
-            echo "Using $XCODE26"
-            sudo xcode-select -s "$XCODE26"
-          else
-            echo "Xcode 26 not found, available Xcode versions:"
-            ls -d /Applications/Xcode*.app 2>/dev/null
-          fi
+          # SDK 55 官方支持 Xcode 16.1+，使用 macos-15 自带的 Xcode 16.4
+          sudo xcode-select -s /Applications/Xcode_16.4.app
           xcodebuild -version
 
       - name: Setup Node.js
@@ -140,7 +133,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+            DEVELOPMENT_TEAM="" \
+            SWIFT_STRICT_CONCURRENCY=minimal
 
       - name: Package unsigned IPA
         run: |
