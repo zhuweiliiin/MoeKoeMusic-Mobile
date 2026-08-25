@@ -96,9 +96,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Select Xcode 16
+      - name: Select Xcode 26
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.4.app
+          # SDK 55 采用 Swift 6 语言模式，需要 Xcode 26
+          XCODE26=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$XCODE26" ]; then
+            echo "Using $XCODE26"
+            sudo xcode-select -s "$XCODE26"
+          else
+            echo "Xcode 26 not found, available Xcode versions:"
+            ls -d /Applications/Xcode*.app 2>/dev/null
+          fi
           xcodebuild -version
 
       - name: Setup Node.js
@@ -114,27 +122,11 @@ jobs:
           npm run generate:mobile-api
 
       - name: Prebuild iOS project
-        run: npx expo prebuild --platform ios --no-install
+        run: EXPO_USE_PRECOMPILED_MODULES=1 npx expo prebuild --platform ios --no-install
 
       - name: Install CocoaPods dependencies
         working-directory: ios
-        run: pod install
-
-      - name: Force Swift 5.0 for all Pod targets
-        working-directory: ios
-        run: |
-          # Modify the Pods project to use Swift 5.0 for all targets
-          # This fixes Swift 6 strict concurrency errors in expo-modules-core
-          PODS_PROJ="Pods/Pods.xcodeproj/project.pbxproj"
-          if [ -f "$PODS_PROJ" ]; then
-            # Replace any existing SWIFT_VERSION settings
-            sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.0;/g' "$PODS_PROJ"
-            echo "Updated SWIFT_VERSION to 5.0 in Pods project"
-            grep "SWIFT_VERSION" "$PODS_PROJ" | head -5
-          else
-            echo "Pods project not found at $PODS_PROJ"
-            ls -la Pods/
-          fi
+        run: EXPO_USE_PRECOMPILED_MODULES=1 pod install
 
       # 关闭代码签名构建 archive，产出未签名 IPA，供用户自行签名安装
       - name: Build unsigned archive
@@ -148,9 +140,7 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            SWIFT_VERSION=5.0 \
-            OTHER_SWIFT_FLAGS="-swift-version 5"
+            DEVELOPMENT_TEAM=""
 
       - name: Package unsigned IPA
         run: |
