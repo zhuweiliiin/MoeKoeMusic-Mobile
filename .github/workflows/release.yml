@@ -118,18 +118,26 @@ jobs:
 
       - name: Fix Swift 6 concurrency issues
         run: |
-          # Add post_install hook to Podfile to use Swift 5 mode
-          cat >> ios/Podfile << 'PODFILE_EOF'
-
-          post_install do |installer|
-            installer.pods_project.targets.each do |target|
+          # Modify Podfile to set Swift 5.0 for all pods
+          # Use ruby to safely modify the Podfile
+          ruby -e '
+            podfile = File.read("ios/Podfile")
+            swift_fix = %q{
               target.build_configurations.each do |config|
-                config.build_settings['SWIFT_VERSION'] = '5.0'
+                config.build_settings["SWIFT_VERSION"] = "5.0"
               end
+            }
+            if podfile.include?("post_install")
+              # Inject into existing post_install block
+              podfile.gsub!(/(post_install do \|installer\|)/, "\\1\n#{swift_fix}")
+            else
+              # Add new post_install block
+              podfile += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n#{swift_fix}\n  end\nend\n"
             end
-          end
-          PODFILE_EOF
-          echo "Podfile updated with Swift 5.0 post_install hook"
+            File.write("ios/Podfile", podfile)
+          '
+          echo "Podfile updated"
+          cat ios/Podfile | tail -20
 
       - name: Install CocoaPods dependencies
         working-directory: ios
