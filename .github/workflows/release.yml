@@ -28,7 +28,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm install --legacy-peer-deps
-          npm --prefix api install
+          cd api && npm install --no-package-lock --legacy-peer-deps && cd ..
           npm run generate:mobile-api
 
       - name: Prebuild Android project
@@ -110,7 +110,7 @@ jobs:
       - name: Install dependencies
         run: |
           npm install --legacy-peer-deps
-          npm --prefix api install
+          cd api && npm install --no-package-lock --legacy-peer-deps && cd ..
           npm run generate:mobile-api
 
       - name: Prebuild iOS project
