@@ -116,32 +116,25 @@ jobs:
       - name: Prebuild iOS project
         run: npx expo prebuild --platform ios --no-install
 
-      - name: Fix Swift 6 concurrency issues
-        run: |
-          # Modify Podfile to set Swift 5.0 for all pods
-          # Use ruby to safely modify the Podfile
-          ruby -e '
-            podfile = File.read("ios/Podfile")
-            swift_fix = %q{
-              target.build_configurations.each do |config|
-                config.build_settings["SWIFT_VERSION"] = "5.0"
-              end
-            }
-            if podfile.include?("post_install")
-              # Inject into existing post_install block
-              podfile.gsub!(/(post_install do \|installer\|)/, "\\1\n#{swift_fix}")
-            else
-              # Add new post_install block
-              podfile += "\npost_install do |installer|\n  installer.pods_project.targets.each do |target|\n#{swift_fix}\n  end\nend\n"
-            end
-            File.write("ios/Podfile", podfile)
-          '
-          echo "Podfile updated"
-          cat ios/Podfile | tail -20
-
       - name: Install CocoaPods dependencies
         working-directory: ios
         run: pod install
+
+      - name: Force Swift 5.0 for all Pod targets
+        working-directory: ios
+        run: |
+          # Modify the Pods project to use Swift 5.0 for all targets
+          # This fixes Swift 6 strict concurrency errors in expo-modules-core
+          PODS_PROJ="Pods/Pods.xcodeproj/project.pbxproj"
+          if [ -f "$PODS_PROJ" ]; then
+            # Replace any existing SWIFT_VERSION settings
+            sed -i '' 's/SWIFT_VERSION = [0-9.]*;/SWIFT_VERSION = 5.0;/g' "$PODS_PROJ"
+            echo "Updated SWIFT_VERSION to 5.0 in Pods project"
+            grep "SWIFT_VERSION" "$PODS_PROJ" | head -5
+          else
+            echo "Pods project not found at $PODS_PROJ"
+            ls -la Pods/
+          fi
 
       # 关闭代码签名构建 archive，产出未签名 IPA，供用户自行签名安装
       - name: Build unsigned archive
@@ -155,7 +148,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM=""
+            DEVELOPMENT_TEAM="" \
+            SWIFT_VERSION=5.0 \
+            OTHER_SWIFT_FLAGS="-swift-version 5"
 
       - name: Package unsigned IPA
         run: |
