@@ -29,3 +29,11 @@ MoeKoeMusic 移动端（iOS/Android 音乐播放器），基于 Expo/React Nativ
 2. **不要强制 `SWIFT_VERSION=5.0`**：会破坏 Swift 6 的 noncopyable/~Copyable 类型，报 `cannot find type in scope`。正确做法是保持 Swift 6 语言模式，必要时用 `SWIFT_STRICT_CONCURRENCY=minimal`。
 3. **不要启用 `EXPO_USE_PRECOMPILED_MODULES=1`**：在 GitHub Actions 会卡在 `resolve-dsym-sourcemaps.js`（ExpoVideo dSYM）阶段。用源码编译 + Xcode 26。
 4. 版本对齐是编译成功的前提：任何"升级依赖修复编译错误"都要先对照 SDK 55 的 bundledNativeModules.json，避免连环错误升级（如 reanimated 4.2.1 被误升到 4.3.0 导致 worklets 也要升 0.8.x）。
+
+## 播放器与收藏关键实现（后续改动务必保持）
+- `src/features/player/store.ts`
+  - `loadTrackAt` 用 `loadSequence` 竞态计数防"快速连点切歌"串音；`player.replace()` 必须 `await` 后再 `play()`，否则 play 可能仍作用在上一首 source 上（表现为"点下一首没换歌"）。`replace` 之后还要再校验一次 sequence。
+  - `playTracks(tracks, startIndex)` 建立队列时先 `filter(hash)` 得到 playable；目标 hash 要从 `startIndex` 向后扫第一个非空 hash，否则 startIndex 处曲目无 hash 会退化成播 playable 第一首（"点 A 播 B"）。
+- `src/features/library/library-api.ts` 的 `fetchPlaylistTrackRefs(gid)`：完整翻页拉取「我喜欢」全部 hash/fileid（原 4 页×300=1200 上限会导致超大歌单尾部红心不亮），终止条件用「本页不足满页 / refs 数量达 total / 满页却零有效条目」三重判断，200 页硬上限兜底防死循环。
+- 底部播放栏 `src/components/ui/mini-player.tsx`、全屏 `src/app/player.tsx` 均有红心按钮（`useIsLiked` + `libraryActions.toggleLike`）；`useIsLiked` 依赖 liked map 完整。
+- 清除缓存：`src/app/settings.tsx` 的「通用」分区，用 `expo-image` 的 `Image.clearDiskCache()` / `clearMemoryCache()`，只清图片缓存，不动登录态与歌单收藏。

@@ -205,7 +205,13 @@ async function loadTrackAt(index: number, options?: { autoplay?: boolean }) {
     }
 
     const player = ensureAudioPlayer();
-    player.replace({ uri: source.uri });
+    // replace 是异步切换音源,必须先等它完成再 play,否则 play 可能仍作用在上一首
+    // 的 source 上,表现为"点了下一首/点某首歌,结果继续播原来的歌"。
+    await player.replace({ uri: source.uri });
+    // replace 期间用户可能又切了歌或清空了队列,以最新 sequence 为准放弃本次加载。
+    if (sequence !== loadSequence) {
+      return;
+    }
     // 每次换曲重新激活即可同步刷新锁屏元数据;Android 侧同时启动前台服务,
     // 保证息屏后台连续播放不受系统 3 分钟限制。
     player.setActiveForLockScreen(true, lockScreenMetadataFor(track), LOCK_SCREEN_OPTIONS);
@@ -299,11 +305,20 @@ export const playerActions = {
       return null;
     }
 
-    const targetHash = tracks[startIndex]?.hash;
-    const index = Math.max(
-      0,
-      playable.findIndex((track) => track.hash === targetHash)
-    );
+    // 从 startIndex 向后找第一个可播(hash 非空)曲目作为目标,避免 startIndex 位置
+    // 的曲目无 hash 被过滤后,退化成播放 playable 第一首(表现为"点 A 却播了 B")。
+    let targetHash: string | undefined;
+    for (let i = startIndex; i < tracks.length; i += 1) {
+      const candidate = tracks[i]?.hash;
+      if (candidate) {
+        targetHash = candidate;
+        break;
+      }
+    }
+    const foundIndex = targetHash
+      ? playable.findIndex((track) => track.hash === targetHash)
+      : -1;
+    const index = Math.max(0, foundIndex);
 
     failStreak = 0;
     const generation = ++queueGeneration;

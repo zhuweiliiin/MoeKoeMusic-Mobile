@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 import Animated, {
   Easing,
@@ -15,6 +15,8 @@ import Animated, {
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
 import { Artwork } from '@/components/ui/artwork';
+import { showToast } from '@/components/ui/toast';
+import { libraryActions, useIsLiked } from '@/features/library/store';
 import { playerActions, usePlayer, usePlayerProgress } from '@/features/player/store';
 import { useIsDark, usePalette } from '@/hooks/use-palette';
 
@@ -52,6 +54,8 @@ export function MiniPlayer() {
   const isDark = useIsDark();
   const router = useRouter();
   const { track, playing, loading, buffering } = usePlayer();
+  const liked = useIsLiked(track?.hash);
+  const [likeBusy, setLikeBusy] = useState(false);
   const rotation = useSharedValue(0);
 
   useEffect(() => {
@@ -75,6 +79,23 @@ export function MiniPlayer() {
   }
 
   const busy = loading || buffering;
+
+  function handleToggleLike() {
+    if (!track || likeBusy) {
+      return;
+    }
+    setLikeBusy(true);
+    libraryActions
+      .toggleLike(track)
+      .then((result) => {
+        showToast(result === 'liked' ? '已加入「我喜欢」' : '已移出「我喜欢」');
+      })
+      .catch((cause) => {
+        showToast(cause instanceof Error ? cause.message : '操作失败');
+      })
+      .finally(() => setLikeBusy(false));
+  }
+
   function openPlayer() {
     const now = Date.now();
     if (now - lastOpenPlayerAt < 800) {
@@ -116,6 +137,25 @@ export function MiniPlayer() {
             {track.artist || '未知歌手'}
           </Text>
         </YStack>
+
+        <XStack
+          width={30}
+          height={38}
+          alignItems="center"
+          justifyContent="center"
+          opacity={likeBusy ? 0.5 : 1}
+          transition="quickest"
+          pressStyle={{ scale: 0.88, opacity: 0.6 }}
+          onPress={(event) => {
+            event.stopPropagation();
+            handleToggleLike();
+          }}>
+          <Ionicons
+            name={liked ? 'heart' : 'heart-outline'}
+            size={18}
+            color={liked ? palette.accent : palette.textSecondary}
+          />
+        </XStack>
 
         <XStack
           width={38}

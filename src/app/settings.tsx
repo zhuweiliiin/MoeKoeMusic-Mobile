@@ -1,5 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Alert, Modal, Platform, Pressable, ScrollView, StyleSheet } from 'react-native';
@@ -8,6 +9,7 @@ import { Text, View, XStack, YStack } from 'tamagui';
 
 import { SectionHeader } from '@/components/ui/section-header';
 import { SegmentedControl } from '@/components/ui/segmented-control';
+import { showToast } from '@/components/ui/toast';
 import { ACCENT_PRESETS, getPalette, type AccentPreset } from '@/constants/accents';
 import { MaxContentWidth, type SchemeName } from '@/constants/theme';
 import { isLoggedIn } from '@/features/account/user-api';
@@ -161,6 +163,27 @@ export default function SettingsScreen() {
     ]);
   }
 
+  function confirmClearCache() {
+    Alert.alert('清除缓存', '将清除本地缓存的图片数据，不影响登录状态与歌单收藏', [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '清除',
+        style: 'destructive',
+        onPress: () => {
+          void (async () => {
+            try {
+              await ExpoImage.clearDiskCache();
+              await ExpoImage.clearMemoryCache();
+              showToast('缓存已清除');
+            } catch {
+              showToast('清除失败，请稍后重试');
+            }
+          })();
+        },
+      },
+    ]);
+  }
+
   return (
     <View flex={1} backgroundColor={palette.background}>
       <ScrollView
@@ -242,6 +265,12 @@ export default function SettingsScreen() {
               paddingVertical={4}
               overflow="hidden">
               <SettingsRow label="版本" value={version ? `v${version}` : '—'} />
+              <View
+                height={StyleSheet.hairlineWidth}
+                backgroundColor={palette.border}
+                marginHorizontal={14}
+              />
+              <SettingsRow label="清除缓存" icon="trash-outline" onPress={confirmClearCache} />
               <View
                 height={StyleSheet.hairlineWidth}
                 backgroundColor={palette.border}

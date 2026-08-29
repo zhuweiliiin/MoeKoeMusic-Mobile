@@ -95,17 +95,19 @@ export type PlaylistTrackRef = {
 };
 
 const TRACK_REF_PAGE_SIZE = 300;
-const TRACK_REF_MAX_PAGES = 4;
+// 防御接口异常时的最大翻页数:200 页 × 300 首 = 60000 首,远超酷狗歌单容量,
+// 仅在接口持续返回满页旧数据等异常情况下兜底,避免死循环。
+const TRACK_REF_HARD_LIMIT = 200;
 
 /**
  * 拉取歌单全部曲目的 hash/fileid 轻量映射(用于"我喜欢"状态判定与取消喜欢)。
- * 上限 TRACK_REF_MAX_PAGES 页，超大歌单尾部不保证覆盖。
+ * 完整翻页到底,保证超大歌单尾部的曲目也能正确反映收藏状态。
  */
 export async function fetchPlaylistTrackRefs(gid: string): Promise<PlaylistTrackRef[]> {
   await bootstrapMobileApi();
   const refs: PlaylistTrackRef[] = [];
 
-  for (let page = 1; page <= TRACK_REF_MAX_PAGES; page += 1) {
+  for (let page = 1; page <= TRACK_REF_HARD_LIMIT; page += 1) {
     const response = await mobileApi.playlist_track_all({
       id: gid,
       page,
@@ -114,17 +116,23 @@ export async function fetchPlaylistTrackRefs(gid: string): Promise<PlaylistTrack
     const data = toRecord(toRecord(response.body).data);
     const songs = toRecords(data.songs);
 
+    let pushed = 0;
     for (const item of songs) {
       const hash = pickText(item.hash);
       const fileid = pickStringLike(item.fileid);
       if (hash && fileid) {
         refs.push({ hash, fileid });
+        pushed += 1;
       }
     }
 
     const total = pickNumber(toRecord(data.list_info).count);
-    const fetched = page * TRACK_REF_PAGE_SIZE;
-    if (songs.length < TRACK_REF_PAGE_SIZE || (total > 0 && fetched >= total)) {
+    // 本页不足满页说明已到最后一页;已拉够 total 也无需再翻。
+    if (songs.length < TRACK_REF_PAGE_SIZE || (total > 0 && refs.length >= total)) {
+      break;
+    }
+    // 满页却没有解析出任何有效 ref,说明接口在重复返回异常数据,停止翻页。
+    if (pushed === 0) {
       break;
     }
   }
