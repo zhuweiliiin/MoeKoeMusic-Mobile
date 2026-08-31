@@ -94,7 +94,6 @@ function PlaybackProgress() {
         value={[Math.min(shownPosition, Math.max(durationMs, 1))]}
         max={Math.max(durationMs, 1)}
         step={250}
-        disabled={!durationMs}
         onValueChange={(values) => {
           const next = values[0] ?? 0;
           dragValueRef.current = next;
@@ -102,7 +101,7 @@ function PlaybackProgress() {
         }}
         onSlideEnd={() => {
           if (dragValueRef.current !== null) {
-            playerActions.seekToMs(dragValueRef.current);
+            void playerActions.seekToMs(dragValueRef.current);
           }
           dragValueRef.current = null;
           setTimeout(() => setDragValue(null), 180);
@@ -210,7 +209,7 @@ export default function PlayerScreen() {
   }
 
   const handleSeekLine = useCallback((line: { timeMs: number }) => {
-    playerActions.seekToMs(line.timeMs);
+    void playerActions.seekToMs(line.timeMs);
   }, []);
 
   if (!track) {

@@ -7,13 +7,12 @@ type RuntimeProcess = {
   env?: Record<string, string | undefined>;
 };
 
-let runtimePreparationPromise: Promise<void> | null = null;
+export type KugouSourceMode = 'official' | 'lite';
 
-function installRuntimeGlobals(): void {
-  if (!globalThis.Buffer) {
-    globalThis.Buffer = Buffer;
-  }
+// 默认概念版(lite);正式版由 setKugouPlatform 在 settings hydrate 后按用户选择覆盖。
+let currentSourceMode: KugouSourceMode = 'lite';
 
+function applyPlatformValue(): void {
   const runtimeGlobal = globalThis as { process?: RuntimeProcess };
   if (!runtimeGlobal.process) {
     runtimeGlobal.process = {
@@ -23,7 +22,32 @@ function installRuntimeGlobals(): void {
 
   const processRef = runtimeGlobal.process;
   processRef.env ??= Object.create(null) as Record<string, string | undefined>;
-  processRef.env.platform = 'lite';
+  // 正式版不写 platform,使 api/util 里 process.env.platform === 'lite' 判定为 false。
+  processRef.env.platform = currentSourceMode === 'lite' ? 'lite' : undefined;
+}
+
+/**
+ * 动态切换酷狗 API 音源:概念版(lite)/正式版(official)。
+ * request.js 每次请求都读取 process.env.platform,故多数接口即时生效;
+ * 少数在模块加载时固化 isLite/appid/clientver 的模块(如 login)对已缓存的模块需重启生效。
+ */
+export function setKugouPlatform(mode: KugouSourceMode): void {
+  currentSourceMode = mode;
+  applyPlatformValue();
+}
+
+export function getKugouPlatform(): KugouSourceMode {
+  return currentSourceMode;
+}
+
+let runtimePreparationPromise: Promise<void> | null = null;
+
+function installRuntimeGlobals(): void {
+  if (!globalThis.Buffer) {
+    globalThis.Buffer = Buffer;
+  }
+
+  applyPlatformValue();
 }
 
 async function prepareRuntime(): Promise<void> {

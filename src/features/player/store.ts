@@ -13,6 +13,7 @@ import { sizedImage } from '@/lib/format';
 import { loadLyricLines } from './lyrics';
 import { resolveSongSource } from './song-url';
 import type { LyricLine, LyricsStatus, PlayMode, PlayerTrack } from './types';
+import { maybeReportListenAndClaimVip } from './vip-claim';
 
 export type PlayerState = {
   queue: PlayerTrack[];
@@ -93,6 +94,8 @@ let failStreak = 0;
 let advanceTimer: ReturnType<typeof setTimeout> | null = null;
 // 每次“建立新队列”都会自增；后台补齐歌单剩余曲目时靠它判断队列是否已被替换。
 let queueGeneration = 0;
+// >0 表示正在 seek，期间忽略 playbackStatus 回传的 positionMs，避免拖动后进度条被旧值拉回。
+let seekGeneration = 0;
 
 // expo-audio 单 player 的锁屏/通知栏没有上一首/下一首命令(原生侧明确移除),
 // 只有 播放暂停+进度条+±10 秒;切歌按钮需迁移原生队列(AudioPlaylist),暂不做。
@@ -128,10 +131,26 @@ function ensureAudioPlayer(): AudioPlayer {
 
 function handlePlaybackStatus(status: AudioStatus) {
   const current = progressStore.getState();
-  progressStore.setState({
-    positionMs: Math.max(0, Math.round(status.currentTime * 1000)),
-    durationMs: status.duration > 0 ? Math.round(status.duration * 1000) : current.durationMs,
-  });
+  const patch: Partial<ProgressState> = {};
+
+  if (status.duration > 0) {
+    const duration = Math.round(status.duration * 1000);
+    if (duration !== current.durationMs) {
+      patch.durationMs = duration;
+    }
+  }
+  // seek 挂起期间跳过 positionMs，避免 onSlideEnd 的 seekTo 刚发出、原生还没定位完成时，
+  // 旧的 currentTime 把进度条拉回拖动前的位置（表现为“拖动后跳回/卡住”）。
+  if (!seekGeneration) {
+    const position = Math.max(0, Math.round(status.currentTime * 1000));
+    if (position !== current.positionMs) {
+      patch.positionMs = position;
+    }
+  }
+
+  if (patch.durationMs !== undefined || patch.positionMs !== undefined) {
+    progressStore.setState(patch);
+  }
 
   const state = playerStore.getState();
   const playing = status.playing;
@@ -148,10 +167,19 @@ function handlePlaybackStatus(status: AudioStatus) {
 function handleTrackFinished() {
   const { mode, queue } = playerStore.getState();
 
+  // clearQueue 之后可能仍收到上一首的 didJustFinish 事件，此时不再启动播放。
+  if (!queue.length) {
+    return;
+  }
+
   if (mode === 'single' || queue.length <= 1) {
     const player = ensureAudioPlayer();
-    void player.seekTo(0);
-    player.play();
+    try {
+      void player.seekTo(0);
+      player.play();
+    } catch {
+      // 循环播放时播放器就绪态瞬时异常，静默忽略，避免事件回调抛错导致崩溃。
+    }
     return;
   }
 
@@ -224,6 +252,9 @@ async function loadTrackAt(index: number, options?: { autoplay?: boolean }) {
     if (source.durationMs > 0) {
       progressStore.setState({ durationMs: source.durationMs });
     }
+
+    // 概念版(lite)下听歌自动领畅听 VIP；尽力而为，失败静默。
+    void maybeReportListenAndClaimVip(track.hash, track.albumAudioId);
 
   } catch (error) {
     if (sequence !== loadSequence) {
@@ -372,7 +403,11 @@ export const playerActions = {
   },
 
   pause() {
-    playerStore.getState().track && audioPlayer?.pause();
+    try {
+      playerStore.getState().track && audioPlayer?.pause();
+    } catch {
+      // 播放器被系统回收等瞬时异常下静默，避免高频点击暂停崩溃。
+    }
   },
 
   toggle() {
@@ -392,11 +427,15 @@ export const playerActions = {
       return;
     }
 
-    const { positionMs, durationMs } = progressStore.getState();
-    if (durationMs > 0 && positionMs >= durationMs - 300) {
-      void player.seekTo(0);
+    try {
+      const { positionMs, durationMs } = progressStore.getState();
+      if (durationMs > 0 && positionMs >= durationMs - 300) {
+        void player.seekTo(0);
+      }
+      player.play();
+    } catch {
+      // 播放器就绪态异常时静默失败，避免状态未知时的 play/seek 抛错导致崩溃。
     }
-    player.play();
   },
 
   next() {
@@ -407,7 +446,7 @@ export const playerActions = {
     void skip(-1);
   },
 
-  seekToMs(positionMs: number) {
+  async seekToMs(positionMs: number) {
     const { track } = playerStore.getState();
     if (!track || !audioPlayer) {
       return;
@@ -416,7 +455,16 @@ export const playerActions = {
     const { durationMs } = progressStore.getState();
     const clamped = Math.max(0, durationMs > 0 ? Math.min(positionMs, durationMs) : positionMs);
     progressStore.setState({ positionMs: clamped });
-    void audioPlayer.seekTo(clamped / 1000);
+
+    const token = ++seekGeneration;
+    try {
+      await audioPlayer.seekTo(clamped / 1000);
+    } finally {
+      // seek 结束(无论成败)都释放挂起，避免进度条从此不再前进。
+      if (token === seekGeneration) {
+        seekGeneration = 0;
+      }
+    }
   },
 
   setMode(mode: PlayMode) {

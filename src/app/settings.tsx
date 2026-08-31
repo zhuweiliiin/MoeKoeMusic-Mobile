@@ -14,7 +14,7 @@ import { ACCENT_PRESETS, getPalette, type AccentPreset } from '@/constants/accen
 import { MaxContentWidth, type SchemeName } from '@/constants/theme';
 import { isLoggedIn } from '@/features/account/user-api';
 import { libraryActions } from '@/features/library/store';
-import { settingsActions, useSettings, type ThemeMode } from '@/features/settings/store';
+import { settingsActions, useSettings, useSourceMode, type SourceMode, type ThemeMode } from '@/features/settings/store';
 import { useEffectiveScheme, usePalette } from '@/hooks/use-palette';
 import { clearApiSession } from '@/lib/kugou-api';
 
@@ -23,6 +23,11 @@ const THEME_MODE_OPTIONS = [
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
 ] as const satisfies readonly { value: ThemeMode; label: string }[];
+
+const SOURCE_MODE_OPTIONS = [
+  { value: 'lite', label: '酷狗概念版' },
+  { value: 'official', label: '酷狗正式版' },
+] as const satisfies readonly { value: SourceMode; label: string }[];
 
 const REPO_URL = 'https://github.com/MoeKoeMusic/MoeKoeMusic-Mobile';
 const WEBSITE_URL = 'https://music.moekoe.cn';
@@ -138,6 +143,7 @@ export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { themeMode, accentId } = useSettings();
+  const sourceMode = useSourceMode();
   const [loggedIn, setLoggedIn] = useState(() => isLoggedIn());
   const [aboutVisible, setAboutVisible] = useState(false);
   const version = Constants.expoConfig?.version ?? '';
@@ -164,24 +170,32 @@ export default function SettingsScreen() {
   }
 
   function confirmClearCache() {
-    Alert.alert('清除缓存', '将清除本地缓存的图片数据，不影响登录状态与歌单收藏', [
-      { text: '取消', style: 'cancel' },
-      {
-        text: '清除',
-        style: 'destructive',
-        onPress: () => {
-          void (async () => {
-            try {
-              await ExpoImage.clearDiskCache();
-              await ExpoImage.clearMemoryCache();
-              showToast('缓存已清除');
-            } catch {
-              showToast('清除失败，请稍后重试');
-            }
-          })();
+    Alert.alert(
+      '清除缓存',
+      '将清除本地缓存的图片数据（专辑封面、歌单封面等）。歌曲为在线流式播放，不产生本地缓存文件；登录状态与歌单收藏不受影响。',
+      [
+        { text: '取消', style: 'cancel' },
+        {
+          text: '清除',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              try {
+                await ExpoImage.clearDiskCache();
+                await ExpoImage.clearMemoryCache();
+                showToast('缓存已清除');
+              } catch {
+                showToast('清除失败，请稍后重试');
+              }
+            })();
+          },
         },
-      },
-    ]);
+      ]);
+  }
+
+  function handleSourceModeChange(mode: SourceMode) {
+    settingsActions.setSourceMode(mode);
+    showToast(mode === 'lite' ? '已切换至酷狗概念版' : '已切换至酷狗正式版');
   }
 
   return (
@@ -252,6 +266,33 @@ export default function SettingsScreen() {
                   ))}
                 </XStack>
               </YStack>
+            </YStack>
+          </YStack>
+
+          <YStack gap={10}>
+            <SectionHeader title="音源" />
+            <YStack
+              backgroundColor={palette.card}
+              borderRadius={20}
+              borderWidth={StyleSheet.hairlineWidth}
+              borderColor={palette.border}
+              padding={14}
+              gap={12}>
+              <YStack gap={10}>
+                <Text color={palette.textSecondary} fontSize={13} fontWeight="600">
+                  音源来源
+                </Text>
+                <SegmentedControl
+                  options={SOURCE_MODE_OPTIONS}
+                  value={sourceMode}
+                  onChange={handleSourceModeChange}
+                />
+              </YStack>
+              <Text color={palette.textTertiary} fontSize={12} lineHeight={18}>
+                {sourceMode === 'lite'
+                  ? '酷狗概念版：听歌可自动领取畅听 VIP，无需每日手动签到。切换后部分功能需重启应用完整生效。'
+                  : '酷狗正式版：需每日手动签到领取 VIP。切换后部分功能需重启应用完整生效。'}
+              </Text>
             </YStack>
           </YStack>
 

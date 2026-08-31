@@ -100,21 +100,30 @@ const TRACK_REF_PAGE_SIZE = 300;
 const TRACK_REF_HARD_LIMIT = 200;
 
 /**
- * 拉取歌单全部曲目的 hash/fileid 轻量映射(用于"我喜欢"状态判定与取消喜欢)。
+ * 拉取"我喜欢"歌单全部曲目的 hash/fileid 轻量映射(用于收藏状态判定与取消喜欢)。
+ * "我喜欢"是私有歌单,get_other_list_file 对私有歌单返回不完整,必须改用
+ * playlist_track_all_new(/v4/get_list_all_file,listid+userid+token)才能拉全。
  * 完整翻页到底,保证超大歌单尾部的曲目也能正确反映收藏状态。
  */
-export async function fetchPlaylistTrackRefs(gid: string): Promise<PlaylistTrackRef[]> {
+export async function fetchPlaylistTrackRefs(listid: string): Promise<PlaylistTrackRef[]> {
   await bootstrapMobileApi();
+  const session = getApiSession();
+  const userid = pickStringLike(session.userid) || '0';
+  const token = pickStringLike(session.token) || '';
   const refs: PlaylistTrackRef[] = [];
 
   for (let page = 1; page <= TRACK_REF_HARD_LIMIT; page += 1) {
-    const response = await mobileApi.playlist_track_all({
-      id: gid,
+    const response = await mobileApi.playlist_track_all_new({
+      listid,
+      userid,
+      token,
       page,
       pagesize: TRACK_REF_PAGE_SIZE,
     });
     const data = toRecord(toRecord(response.body).data);
-    const songs = toRecords(data.songs);
+    // get_list_all_file 的曲目在 info 下;个别情况退化为 songs。
+    const rawSongs = toRecords(data.info);
+    const songs = rawSongs.length > 0 ? rawSongs : toRecords(data.songs);
 
     let pushed = 0;
     for (const item of songs) {
@@ -126,7 +135,7 @@ export async function fetchPlaylistTrackRefs(gid: string): Promise<PlaylistTrack
       }
     }
 
-    const total = pickNumber(toRecord(data.list_info).count);
+    const total = pickNumber(data.count) || pickNumber(toRecord(data.list_info).count);
     // 本页不足满页说明已到最后一页;已拉够 total 也无需再翻。
     if (songs.length < TRACK_REF_PAGE_SIZE || (total > 0 && refs.length >= total)) {
       break;

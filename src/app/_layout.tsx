@@ -8,6 +8,7 @@ import { useEffect, useMemo } from 'react';
 import { TamaguiProvider } from 'tamagui';
 
 import { hydrateSettings, useSettingsHydrated } from '@/features/settings/store';
+import { libraryActions } from '@/features/library/store';
 import { ToastHost } from '@/components/ui/toast';
 import { useEffectiveScheme, usePalette } from '@/hooks/use-palette';
 import { tamaguiConfig } from '../../tamagui.config';
@@ -38,6 +39,8 @@ export default function RootLayout() {
   useEffect(() => {
     if (hydrated) {
       void SplashScreen.hideAsync().catch(() => undefined);
+      // 启动即刷新「我喜欢」映射,保证每日推荐/歌单里的红心状态即时准确
+      void libraryActions.ensure().catch(() => undefined);
     }
   }, [hydrated]);
 

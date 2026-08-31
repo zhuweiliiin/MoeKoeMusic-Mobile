@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { startTransition, useEffect, useRef, useState } from 'react';
-import { FlatList, StyleSheet, View as RNView } from 'react-native';
+import { FlatList, StyleSheet, TextInput, View as RNView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Spinner, Text, View, XStack, YStack } from 'tamagui';
 
@@ -49,6 +49,7 @@ export default function PlaylistScreen() {
     error: '',
   });
   const [actionTrack, setActionTrack] = useState<PlayerTrack | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const library = useLibrary();
   // 自己的歌单(含"我喜欢")才允许移除歌曲;listid 是写操作专用 ID
@@ -141,11 +142,30 @@ export default function PlaylistScreen() {
     });
   }
 
+  /** 搜索过滤后列表里的条目，需要映射回完整列表的真实索引再播放。 */
+  function playFromTrack(item: PlayerTrack) {
+    const index = state.tracks.findIndex((candidate) => candidate.hash === item.hash);
+    if (index >= 0) {
+      playFrom(index);
+    }
+  }
+
   const fallbackName = typeof params.name === 'string' ? params.name : '';
   const fallbackCover = typeof params.cover === 'string' && params.cover ? params.cover : null;
   const title = state.info?.name || fallbackName || '歌单';
   const coverUrl = state.info?.coverUrl ?? fallbackCover;
   const activeHash = track?.hash;
+  const query = searchQuery.trim();
+  const filteredTracks = query
+    ? state.tracks.filter((item) => {
+        const q = query.toLowerCase();
+        return (
+          item.title.toLowerCase().includes(q) ||
+          item.artist.toLowerCase().includes(q) ||
+          (item.album?.toLowerCase().includes(q) ?? false)
+        );
+      })
+    : state.tracks;
   const listBottomInset = insets.bottom + (hasTrack ? MINI_PLAYER_HEIGHT + 26 : 16) + 16;
 
   return (
@@ -156,8 +176,10 @@ export default function PlaylistScreen() {
       />
 
       <FlatList
-        data={state.tracks}
+        data={filteredTracks}
         keyExtractor={(item, index) => `${item.hash}-${index}`}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
         showsVerticalScrollIndicator={false}
         onEndReachedThreshold={0.5}
         onEndReached={() => {
@@ -206,6 +228,42 @@ export default function PlaylistScreen() {
                 </Text>
               </YStack>
             </XStack>
+
+            {state.tracks.length ? (
+              <XStack
+                alignItems="center"
+                gap={8}
+                height={44}
+                paddingHorizontal={14}
+                borderRadius={22}
+                backgroundColor={palette.card}
+                borderWidth={StyleSheet.hairlineWidth}
+                borderColor={palette.border}>
+                <Ionicons name="search" size={17} color={palette.textTertiary} />
+                <TextInput
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  placeholder="搜索歌单里的歌曲、歌手"
+                  placeholderTextColor={palette.textTertiary}
+                  returnKeyType="search"
+                  autoCorrect={false}
+                  style={[styles.searchInput, { color: palette.text }]}
+                />
+                {searchQuery ? (
+                  <XStack
+                    width={22}
+                    height={22}
+                    borderRadius={11}
+                    alignItems="center"
+                    justifyContent="center"
+                    backgroundColor={palette.cardAlt}
+                    pressStyle={{ opacity: 0.6 }}
+                    onPress={() => setSearchQuery('')}>
+                    <Ionicons name="close" size={13} color={palette.textSecondary} />
+                  </XStack>
+                ) : null}
+              </XStack>
+            ) : null}
 
             {state.tracks.length ? (
               <XStack
@@ -269,7 +327,7 @@ export default function PlaylistScreen() {
             track={item}
             rank={index + 1}
             active={item.hash === activeHash}
-            onPress={() => playFrom(index)}
+            onPress={() => playFromTrack(item)}
             onMore={() => setActionTrack(item)}
           />
         )}
@@ -318,5 +376,11 @@ const styles = StyleSheet.create({
   miniDockInner: {
     width: '100%',
     maxWidth: 680,
+  },
+  searchInput: {
+    flex: 1,
+    height: 44,
+    paddingVertical: 0,
+    fontSize: 14.5,
   },
 });

@@ -72,7 +72,7 @@ async function refreshLikedMap(): Promise<void> {
         return;
       }
 
-      const refs = await fetchPlaylistTrackRefs(like.gid);
+      const refs = await fetchPlaylistTrackRefs(like.listid || like.gid);
       const liked: Record<string, string> = {};
       for (const ref of refs) {
         liked[ref.hash] = ref.fileid;
